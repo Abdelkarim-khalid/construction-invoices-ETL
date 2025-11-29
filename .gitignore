@@ -12,7 +12,7 @@ env.bak/
 venv.bak/
 
 # Database
-*.db
+# *.db  # تم التعليق للسماح برفع ملف قاعدة البيانات
 *.sqlite
 *.sqlite3
 
