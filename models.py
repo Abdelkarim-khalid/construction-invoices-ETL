@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, Boolean, ForeignKey, Text, Enum
+from sqlalchemy import Column, Integer, String, Float, Date, Boolean, ForeignKey, Text, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base  # تأكد ان ملف database.py موجود وفيه تعريف Base
 import enum
@@ -76,7 +76,9 @@ class InvoiceLog(Base):
     
     # علاقة ذاتية للوصول للمستخلص السابق
     previous_invoice = relationship("InvoiceLog", remote_side=[id])
-
+    __table_args__ = (
+        UniqueConstraint('project_id', 'invoice_number', name='uix_project_invoice_number'),
+    )
 # =========================================================
 # 5. Staging Area: منطقة التجهيز (المسودة)
 # تستقبل البيانات الخام من الإكسيل قبل التنظيف

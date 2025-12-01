@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 from datetime import date, timedelta
 
 from models import (
@@ -13,51 +14,36 @@ from models import (
     StagingInvoiceDetail,
 )
 
-
 def _parse_float(value, default: float = 0.0) -> float:
-    """
-    Helper: يحول أي قيمة نصية لرقم Float بأمان.
-    """
+    """Helper: يحول أي قيمة نصية لرقم Float بأمان."""
     if value is None:
         return default
     if isinstance(value, (int, float)):
         return float(value)
-
     s = str(value).strip()
     if not s or s.lower() == "nan":
         return default
-
-    s = s.replace("%", "").strip()
-    s = s.replace(",", "")
-
+    s = s.replace("%", "").strip().replace(",", "")
     try:
         return float(s)
     except ValueError:
         return default
 
-
-def extract_phase_from_text(text: str):
-    """
-    يفصل الوصف عن المرحلة (ما بين القوسين)
-    Input: "بند 9-2 باب (حلوق)" 
-    Output: ("بند 9-2 باب", "حلوق")
-    """
-    if not text:
-        return "", ""
-    
+def extract_phase_from_text(text):
+    """يفصل الوصف عن المرحلة (ما بين القوسين)."""
+    if text is None: return "", ""
     clean_text = str(text).strip()
-    # البحث عن نص بين قوسين في نهاية السطر
+    if not clean_text or clean_text.lower() == 'nan': return "", ""
+
     pattern = r"\((.*?)\)$"
     match = re.search(pattern, clean_text)
     
     if match:
         phase = match.group(1).strip()
-        # نأخذ النص ما قبل القوس كوصف رئيسي (لو احتجناه)
         main_desc = clean_text[:match.start()].strip()
         return main_desc, phase
     
-    return clean_text, "كامل"  # لو مفيش أقواس نعتبره بند كامل
-
+    return clean_text, "كامل"
 
 def process_excel_invoice(
     db: Session,
@@ -66,12 +52,11 @@ def process_excel_invoice(
     inv_number: str | int,
     start_date: date,
     end_date: date,
+    sheet_name: str = 0,
 ):
-    """
-    Phase 1: STAGING ONLY (الرفع المبدئي)
-    """
-
-    # تأكد إن المشروع موجود
+    """Phase 1: STAGING ONLY with Duplication Check"""
+    
+    # 1. Validation: Project exists
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise ValueError(f"Project with id={project_id} not found")
@@ -81,7 +66,25 @@ def process_excel_invoice(
     except (TypeError, ValueError):
         raise ValueError("invoice_number must be convertible to integer")
 
-    # 1) إنشاء سجل المستخلص DRAFT
+    # --- فحص التكرار (The New Logic) ---
+    existing_invoice = db.query(InvoiceLog).filter(
+        InvoiceLog.project_id == project_id,
+        InvoiceLog.invoice_number == invoice_number_int
+    ).first()
+
+    if existing_invoice:
+        if existing_invoice.status == InvoiceStatus.APPROVED:
+            raise ValueError(
+                f"تنبيه: المستخلص رقم ({invoice_number_int}) لهذا المشروع تم اعتماده سابقاً. لا يمكن رفعه مرة أخرى."
+            )
+        else:
+            # لو Draft امسحه ونضف مكانه
+            db.query(StagingInvoiceDetail).filter(StagingInvoiceDetail.invoice_id == existing_invoice.id).delete()
+            db.delete(existing_invoice)
+            db.commit()
+    # -----------------------------------
+
+    # 2. Create Draft Log
     new_invoice = InvoiceLog(
         project_id=project_id,
         invoice_number=invoice_number_int,
@@ -93,62 +96,54 @@ def process_excel_invoice(
     db.commit()
     db.refresh(new_invoice)
 
-    # 2) قراءة ملف الإكسل
+    # 3. Read Excel
     try:
-        df = pd.read_excel(file_path)
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
     except Exception as e:
         db.delete(new_invoice)
         db.commit()
         raise ValueError(f"Failed to read Excel file: {str(e)}")
 
-    # Mapping للأعمدة
-    col_map = {
-        "item_code": None,
-        "description": None,
-        "qty": None,
-        "percentage": None,
-    }
-
+    # 4. Column Mapping Strategy
+    col_map = {"item_code": None, "description": None, "qty": None, "percentage": None}
     lower_cols = {str(c).strip().lower(): c for c in df.columns}
 
     patterns_map = {
-        "item_code": ["item_code", "code", "item", "boq", "boq_code", "رقم البند", "كود"],
-        "description": ["description", "desc", "تفصيل", "البند", "بيان الأعمال"],
-        "qty": ["total_qty", "qty", "quantity", "الكمية", "الكمية الحالية"],
-        "percentage": ["percentage", "pct", "نسبة", "نسبة الصرف"],
+        "item_code": ["item_code", "code", "item", "boq", "boq_code", "رقم البند", "كود", "رقم بند"],
+        "description": ["description", "desc", "تفصيل", "البند", "بيان الأعمال", "وصف", "بنود الأعمال"],
+        "qty": ["total_qty", "qty", "quantity", "الكمية", "الكمية الحالية", "الجارى", "الجاري", "كمية الأعمال الجارية"],
+        "percentage": ["percentage", "pct", "نسبة", "نسبة الصرف", "نسبة التنفيذ"],
     }
 
     for key, patterns in patterns_map.items():
         for p in patterns:
-            if p in lower_cols:
-                col_map[key] = lower_cols[p]
+            lp = p.lower()
+            if lp in lower_cols:
+                col_map[key] = lower_cols[lp]
                 break
 
     if not col_map["item_code"] or not col_map["qty"]:
-        # تنظيف لو فشل الرفع
         db.delete(new_invoice)
         db.commit()
-        raise ValueError(
-            f"Missing required columns (Item Code / Qty). Detected mapping: {col_map}"
-        )
+        raise ValueError(f"Missing required columns (Item Code / Qty). Detected: {col_map}")
 
-    # 3) تخزين الصفوف في Staging
+    # 5. Bulk Insert into Staging
     staging_objects = []
     rows_staged = 0
     
     for idx, row in df.iterrows():
         raw_item_code = row.get(col_map["item_code"])
-        raw_description = row.get(col_map["description"]) if col_map["description"] else None
+        raw_desc = row.get(col_map["description"])
         raw_qty = row.get(col_map["qty"])
-        raw_percentage = row.get(col_map["percentage"]) if col_map["percentage"] else None
+        raw_pct = row.get(col_map["percentage"])
 
         staging_row = StagingInvoiceDetail(
             invoice_id=new_invoice.id,
             row_index=int(idx),
-            raw_item_code=str(raw_item_code).strip() if raw_item_code is not None else "",
-            raw_description=str(raw_description).strip() if raw_description is not None else "",
-            raw_qty=str(raw_qty).strip() if raw_qty is not None else "",
-            raw_percentage=str(raw_percentage).strip() if raw_percentage is not None else "",
+            raw_item_code=str(raw_item_code).strip() if pd.notna(raw_item_code) else "",
+            raw_description=str(raw_desc).strip() if pd.notna(raw_desc) else "",
+            raw_qty=str(raw_qty).strip() if pd.notna(raw_qty) else "",
+            raw_percentage=str(raw_pct).strip() if pd.notna(raw_pct) else "",
             is_valid=False,
             error_message=None,
         )
@@ -162,15 +157,12 @@ def process_excel_invoice(
         "status": "staged",
         "invoice_id": new_invoice.id,
         "rows_staged": rows_staged,
-        "message": "Data uploaded to staging successfully. Please review and approve."
+        "message": "Data staged successfully. Please review and approve."
     }
 
-
 def approve_invoice(db: Session, invoice_id: int):
-    """
-    Phase 2: APPROVAL & LEDGER (الاعتماد والحسابات)
-    """
-
+    """Phase 2: APPROVAL & LEDGER"""
+    
     invoice = db.query(InvoiceLog).filter(InvoiceLog.id == invoice_id).first()
     if not invoice:
         raise ValueError("Invoice not found")
@@ -180,38 +172,33 @@ def approve_invoice(db: Session, invoice_id: int):
 
     staging_rows = invoice.staging_data
     if not staging_rows:
-        raise ValueError("No staging rows found for this invoice")
+        raise ValueError("No staging rows found")
 
-    # الفترة الزمنية للتوزيع
+    # Time Calculation
     start_date = invoice.period_start
     end_date = invoice.period_end
+    if not start_date or not end_date:
+        raise ValueError("Invoice dates are missing")
+        
     total_days = (end_date - start_date).days + 1
     if total_days <= 0:
-        raise ValueError("Invoice period must be at least 1 day")
+        raise ValueError("Invalid invoice period")
 
-    # تنظيف أي Ledger قديم لنفس المستخلص (لو بنعيد الاعتماد)
+    # Clean old data
     db.query(DailyLedger).filter(DailyLedger.invoice_id == invoice.id).delete()
-    # تنظيف أي Details قديمة لنفس المستخلص
     db.query(InvoiceDetail).filter(InvoiceDetail.invoice_id == invoice.id).delete()
 
-    for s in staging_rows:
-        raw_item_code = s.raw_item_code.strip() if s.raw_item_code else ""
-        raw_desc = s.raw_description.strip() if s.raw_description else ""
-        claimed_qty = _parse_float(s.raw_qty, default=0.0)
-        current_percentage = _parse_float(s.raw_percentage, default=100.0)
+    processed_count = 0
 
-        # 1. Validation Logic
+    for s in staging_rows:
+        s.is_valid = False
+        s.error_message = None
+
+        raw_item_code = s.raw_item_code.strip()
         if not raw_item_code:
-            s.is_valid = False
             s.error_message = "Missing item code"
             continue
-            
-        if claimed_qty == 0.0:
-             # يمكن قبول كمية صفرية في بعض الحالات، لكن هنا سنعتبرها تحذير أو تجاهل
-             # سنكمل ولكن نضع ملاحظة، أو نعتبرها Valid 
-             pass
 
-        # البحث عن البند في المقايسة
         boq_item = (
             db.query(BOQItem)
             .filter(
@@ -222,89 +209,76 @@ def approve_invoice(db: Session, invoice_id: int):
         )
         
         if not boq_item:
-            s.is_valid = False
-            s.error_message = f"BOQ item code '{raw_item_code}' not found in project contract"
+            s.error_message = f"Item code '{raw_item_code}' not in BOQ"
             continue
 
-        # 2. Calculation Logic
+        claimed_qty = _parse_float(s.raw_qty, 0.0)
+        current_percentage = _parse_float(s.raw_percentage, 100.0)
+
         approved_qty = claimed_qty
         equivalent_qty = approved_qty * (current_percentage / 100.0)
 
-        # 3. Cumulative Logic (التصحيح الهام)
-        # نبحث عن آخر قيمة تراكمية لهذا البند في أي مستخلص سابق معتمد
         last_cumulative_record = (
             db.query(InvoiceDetail)
             .join(InvoiceLog)
             .filter(
                 InvoiceLog.project_id == invoice.project_id,
                 InvoiceLog.status == InvoiceStatus.APPROVED,
-                InvoiceLog.id < invoice.id,  # مستخلصات سابقة فقط
-                InvoiceDetail.boq_item_id == boq_item.id
+                InvoiceLog.id < invoice.id,
+                InvoiceDetail.boq_item_id == boq_item.id,
             )
-            .order_by(InvoiceLog.id.desc())  # الأحدث فالأحدث
+            .order_by(desc(InvoiceLog.id))
             .first()
         )
 
-        previous_cumulative_qty = 0.0
-        if last_cumulative_record:
-            previous_cumulative_qty = last_cumulative_record.total_cumulative_qty
-
+        previous_cumulative_qty = last_cumulative_record.total_cumulative_qty if last_cumulative_record else 0.0
         total_cumulative_qty = previous_cumulative_qty + equivalent_qty
         
-        unit_price_at_time = boq_item.unit_price or 0.0
-        total_value = equivalent_qty * unit_price_at_time
+        unit_price = boq_item.unit_price or 0.0
+        total_value = equivalent_qty * unit_price
 
-        # 4. Description Parsing (استخراج الأقواس)
-        main_desc_text, phase_name = extract_phase_from_text(raw_desc)
+        main_desc_text, phase_name = extract_phase_from_text(s.raw_description)
+        final_desc = phase_name or main_desc_text or "بند كامل"
 
-        # إنشاء التفاصيل النهائية
         detail = InvoiceDetail(
             invoice_id=invoice.id,
             boq_item_id=boq_item.id,
-            row_description=phase_name, # "حلوق" مثلاً
+            row_description=final_desc,
             current_percentage=current_percentage,
             claimed_qty=claimed_qty,
             approved_qty=approved_qty,
             equivalent_qty=equivalent_qty,
             previous_cumulative_qty=previous_cumulative_qty,
             total_cumulative_qty=total_cumulative_qty,
-            unit_price_at_time=unit_price_at_time,
+            unit_price_at_time=unit_price,
             total_value=total_value,
-            notes=None,
         )
         db.add(detail)
 
-        # 5. Daily Ledger Distribution (تفتيت الكمية)
-        if equivalent_qty > 0:
+        if equivalent_qty != 0:
             daily_rate = equivalent_qty / total_days
-            # نستخدم Bulk Insert للسرعة هنا
-            ledger_entries = []
-            for i in range(total_days):
-                current_day = start_date + timedelta(days=i)
-                ledger_entry = DailyLedger(
+            ledger_entries = [
+                DailyLedger(
                     project_id=invoice.project_id,
                     invoice_id=invoice.id,
                     boq_item_id=boq_item.id,
-                    entry_date=current_day,
+                    entry_date=start_date + timedelta(days=i),
                     distributed_qty=daily_rate,
                 )
-                ledger_entries.append(ledger_entry)
+                for i in range(total_days)
+            ]
             db.add_all(ledger_entries)
 
-        # تحديث حالة الـ Staging
         s.is_valid = True
-        s.error_message = "Processed Successfully"
+        s.error_message = "Success"
+        processed_count += 1
 
-    # تحديث حالة المستخلص
     invoice.status = InvoiceStatus.APPROVED
-    
-    # ربطه بالسابق (اختياري للـ Linked List)
-    # يمكن تحديث previous_invoice_id هنا بناء على آخر مستخلص وجدناه
-    
     db.commit()
 
     return {
         "status": "approved",
         "invoice_id": invoice.id,
-        "message": "Invoice approved and ledger generated."
+        "processed_items": processed_count,
+        "message": f"Approved successfully. {processed_count} items processed."
     }
