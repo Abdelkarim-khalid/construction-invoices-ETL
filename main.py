@@ -1,32 +1,68 @@
-from fastapi import FastAPI, Depends, UploadFile, File, Form
+from typing import List  # <--- إضافة هامة
+from fastapi import FastAPI, Depends, UploadFile, File, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from database import get_db
-import models, schemas
-from services.invoice_processor import process_excel_invoice
-from datetime import date
+from sqlalchemy import func
+from datetime import date, timedelta
 import shutil
 import os
 
+from database import get_db
+import models
+import schemas
+from services.invoice_processor import process_excel_invoice, approve_invoice
+
 app = FastAPI(title="Construction Cost Control API")
 
-# 1. Endpoint لإنشاء مشروع جديد
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def home():
+    return {"message": "System is Running 🚀"}
+
+# --- Endpoint جديد: جلب كل المشاريع للقائمة المنسدلة ---
+@app.get("/projects/", response_model=List[schemas.ProjectRead])
+def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    projects = db.query(models.Project).offset(skip).limit(limit).all()
+    return projects
+# -------------------------------------------------------
+
 @app.post("/projects/")
 def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db)):
-    new_project = models.Project(name=project.name)
+    new_project = models.Project(
+        name=project.name,
+        location=project.location
+    )
     db.add(new_project)
     db.commit()
     db.refresh(new_project)
     return new_project
 
-# 2. Endpoint لتعريف بنود المقايسة
 @app.post("/boq/{project_id}")
 def add_boq_item(project_id: int, item: schemas.BOQItemCreate, db: Session = Depends(get_db)):
-    new_item = models.BOQItem(project_id=project_id, **item.dict())
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    new_item = models.BOQItem(
+        project_id=project_id,
+        item_code=item.item_code,
+        description=item.description,
+        unit=item.unit,
+        unit_price=item.unit_price,
+        is_partial=item.is_partial,
+    )
     db.add(new_item)
     db.commit()
-    return {"status": "Item Added", "code": item.item_code}
+    db.refresh(new_item)
+    return new_item
 
-# 3. Endpoint رفع المستخلص (الأهم)
 @app.post("/upload-invoice/")
 async def upload_invoice(
     project_id: int = Form(...),
@@ -34,17 +70,14 @@ async def upload_invoice(
     start_date: date = Form(...),
     end_date: date = Form(...),
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    # حفظ الملف مؤقتاً
-    temp_folder = "temp_uploads"
-    os.makedirs(temp_folder, exist_ok=True)
-    file_path = f"{temp_folder}/{file.filename}"
-    
+    os.makedirs("temp_uploads", exist_ok=True)
+    file_path = os.path.join("temp_uploads", file.filename)
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    
-    # استدعاء السيرفيس للمعالجة
+
     try:
         result = process_excel_invoice(
             db=db,
@@ -52,26 +85,73 @@ async def upload_invoice(
             file_path=file_path,
             inv_number=invoice_number,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
         )
-        return result
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=400, detail=f"Error processing invoice: {str(e)}")
 
-# 4. Endpoint تقرير البرنامج الزمني
+    return result
+
+@app.get("/invoices/{invoice_id}/staging")
+def get_invoice_staging(invoice_id: int, db: Session = Depends(get_db)):
+    invoice = db.query(models.InvoiceLog).filter(models.InvoiceLog.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    rows = []
+    for s in invoice.staging_data:
+        rows.append({
+            "row_index": s.row_index,
+            "raw_item_code": s.raw_item_code,
+            "raw_description": s.raw_description,
+            "raw_qty": s.raw_qty,
+            "raw_percentage": s.raw_percentage,
+            "is_valid": s.is_valid,
+            "error_message": s.error_message,
+        })
+    return rows
+
+@app.post("/invoices/{invoice_id}/approve")
+def approve_invoice_endpoint(invoice_id: int, db: Session = Depends(get_db)):
+    try:
+        result = approve_invoice(db, invoice_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.get("/reports/schedule/{project_id}")
-def get_schedule_report(project_id: int, month: int, year: int, db: Session = Depends(get_db)):
-    # كويري بسيط لتجميع الكميات لشهر معين
-    # هذا مثال مبسط، يمكنك استخدام SQL أعقد
-    from sqlalchemy import extract, func
-    
-    results = db.query(
-        models.BOQItem.item_code, 
-        func.sum(models.DailyLedger.daily_qty).label("total_monthly_qty")
-    ).join(models.DailyLedger)\
-     .filter(models.BOQItem.project_id == project_id)\
-     .filter(extract('month', models.DailyLedger.entry_date) == month)\
-     .filter(extract('year', models.DailyLedger.entry_date) == year)\
-     .group_by(models.BOQItem.item_code).all()
-     
-    return results
+def schedule_report(
+    project_id: int,
+    month: int,
+    year: int,
+    db: Session = Depends(get_db),
+):
+    import calendar
+    last_day = calendar.monthrange(year, month)[1]
+    start_date = date(year, month, 1)
+    end_date = date(year, month, last_day)
+
+    q = (
+        db.query(
+            models.BOQItem.item_code,
+            models.BOQItem.description,
+            func.sum(models.DailyLedger.distributed_qty).label("total_qty"),
+        )
+        .join(models.DailyLedger, models.DailyLedger.boq_item_id == models.BOQItem.id)
+        .filter(
+            models.DailyLedger.project_id == project_id,
+            models.DailyLedger.entry_date >= start_date,
+            models.DailyLedger.entry_date <= end_date,
+        )
+        .group_by(models.BOQItem.item_code, models.BOQItem.description)
+        .all()
+    )
+
+    return [
+        {
+            "item_code": row.item_code,
+            "description": row.description,
+            "total_qty": row.total_qty or 0.0,
+        }
+        for row in q
+    ]
