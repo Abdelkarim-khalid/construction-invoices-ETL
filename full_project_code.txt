@@ -1,0 +1,1465 @@
+Project Code Collection
+Root: F:\EPR Invoice\construction_backend
+==================================================
+
+
+==================================================
+FILE: alembic.ini
+==================================================
+# A generic, single database configuration.
+
+[alembic]
+# path to migration scripts.
+# this is typically a path given in POSIX (e.g. forward slashes)
+# format, relative to the token %(here)s which refers to the location of this
+# ini file
+script_location = %(here)s/alembic
+
+# template used to generate migration file names; The default value is %%(rev)s_%%(slug)s
+# Uncomment the line below if you want the files to be prepended with date and time
+# see https://alembic.sqlalchemy.org/en/latest/tutorial.html#editing-the-ini-file
+# for all available tokens
+# file_template = %%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s
+
+# sys.path path, will be prepended to sys.path if present.
+# defaults to the current working directory.  for multiple paths, the path separator
+# is defined by "path_separator" below.
+prepend_sys_path = .
+
+
+# timezone to use when rendering the date within the migration file
+# as well as the filename.
+# If specified, requires the tzdata library which can be installed by adding
+# `alembic[tz]` to the pip requirements.
+# string value is passed to ZoneInfo()
+# leave blank for localtime
+# timezone =
+
+# max length of characters to apply to the "slug" field
+# truncate_slug_length = 40
+
+# set to 'true' to run the environment during
+# the 'revision' command, regardless of autogenerate
+# revision_environment = false
+
+# set to 'true' to allow .pyc and .pyo files without
+# a source .py file to be detected as revisions in the
+# versions/ directory
+# sourceless = false
+
+# version location specification; This defaults
+# to <script_location>/versions.  When using multiple version
+# directories, initial revisions must be specified with --version-path.
+# The path separator used here should be the separator specified by "path_separator"
+# below.
+# version_locations = %(here)s/bar:%(here)s/bat:%(here)s/alembic/versions
+
+# path_separator; This indicates what character is used to split lists of file
+# paths, including version_locations and prepend_sys_path within configparser
+# files such as alembic.ini.
+# The default rendered in new alembic.ini files is "os", which uses os.pathsep
+# to provide os-dependent path splitting.
+#
+# Note that in order to support legacy alembic.ini files, this default does NOT
+# take place if path_separator is not present in alembic.ini.  If this
+# option is omitted entirely, fallback logic is as follows:
+#
+# 1. Parsing of the version_locations option falls back to using the legacy
+#    "version_path_separator" key, which if absent then falls back to the legacy
+#    behavior of splitting on spaces and/or commas.
+# 2. Parsing of the prepend_sys_path option falls back to the legacy
+#    behavior of splitting on spaces, commas, or colons.
+#
+# Valid values for path_separator are:
+#
+# path_separator = :
+# path_separator = ;
+# path_separator = space
+# path_separator = newline
+#
+# Use os.pathsep. Default configuration used for new projects.
+path_separator = os
+
+# set to 'true' to search source files recursively
+# in each "version_locations" directory
+# new in Alembic version 1.10
+# recursive_version_locations = false
+
+# the output encoding used when revision files
+# are written from script.py.mako
+# output_encoding = utf-8
+
+# database URL.  This is consumed by the user-maintained env.py script only.
+# other means of configuring database URLs may be customized within the env.py
+# file.
+sqlalchemy.url = sqlite:///construction_system.db
+
+[post_write_hooks]
+# post_write_hooks defines scripts or Python functions that are run
+# on newly generated revision scripts.  See the documentation for further
+# detail and examples
+
+# format using "black" - use the console_scripts runner, against the "black" entrypoint
+# hooks = black
+# black.type = console_scripts
+# black.entrypoint = black
+# black.options = -l 79 REVISION_SCRIPT_FILENAME
+
+# lint with attempts to fix using "ruff" - use the module runner, against the "ruff" module
+# hooks = ruff
+# ruff.type = module
+# ruff.module = ruff
+# ruff.options = check --fix REVISION_SCRIPT_FILENAME
+
+# Alternatively, use the exec runner to execute a binary found on your PATH
+# hooks = ruff
+# ruff.type = exec
+# ruff.executable = ruff
+# ruff.options = check --fix REVISION_SCRIPT_FILENAME
+
+# Logging configuration.  This is also consumed by the user-maintained
+# env.py script only.
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARNING
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARNING
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
+
+
+==================================================
+FILE: check_db.py
+==================================================
+from sqlalchemy import create_engine, inspect, text
+from database import DATABASE_URL
+
+def check_database():
+    print(f"Checking database at: {DATABASE_URL}")
+    engine = create_engine(DATABASE_URL)
+    inspector = inspect(engine)
+    
+    tables = inspector.get_table_names()
+    print(f"\nFound {len(tables)} tables:")
+    
+    for table in tables:
+        print(f"\n📋 Table: {table}")
+        columns = inspector.get_columns(table)
+        # Print columns
+        col_names = [col['name'] for col in columns]
+        print(f"   Columns: {', '.join(col_names)}")
+        
+        # Print first 5 rows
+        with engine.connect() as conn:
+            result = conn.execute(text(f"SELECT * FROM {table} LIMIT 5"))
+            rows = result.fetchall()
+            if rows:
+                print("   DATA (First 5 rows):")
+                for row in rows:
+                    print(f"   -> {row}")
+            else:
+                print("   -> [Empty Table]")
+
+if __name__ == "__main__":
+    check_database()
+
+
+==================================================
+FILE: database.py
+==================================================
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+SQLITE_FILE_NAME = "construction_system.db"
+DATABASE_URL = f"sqlite:///{SQLITE_FILE_NAME}"
+
+# إعداد المحرك (connect_args مهمة عشان SQLite يقبل تعدد الـ Threads)
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+# دالة مساعدة للحصول على جلسة داتابيز لكل Request
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+==================================================
+FILE: frontend.py
+==================================================
+import streamlit as st
+import pandas as pd
+import requests
+from datetime import date
+import io
+import string
+
+# ==========================================
+# 1. إعدادات الصفحة والتهيئة
+# ==========================================
+st.set_page_config(page_title="Mini ERP - Construction", layout="wide")
+API_URL = "http://127.0.0.1:8000"
+
+# --- Helper Functions ---
+def get_col_letter(n):
+    string_n = ""
+    while n >= 0:
+        n, remainder = divmod(n, 26)
+        string_n = chr(65 + remainder) + string_n
+        n -= 1
+    return string_n
+
+@st.cache_data(ttl=60)
+def fetch_projects_list():
+    try:
+        res = requests.get(f"{API_URL}/projects/")
+        if res.status_code == 200:
+            return {f"{p['name']} (ID: {p['id']})": p['id'] for p in res.json()}
+        return {}
+    except:
+        return {}
+
+def reset_wizard():
+    st.session_state.step = 1
+    st.session_state.uploaded_file = None
+    st.session_state.sheet_civil = None
+    st.session_state.sheet_elec = None
+
+if 'step' not in st.session_state: st.session_state.step = 1
+if 'mapping_civil' not in st.session_state: st.session_state.mapping_civil = {}
+if 'mapping_elec' not in st.session_state: st.session_state.mapping_elec = {}
+if 'header_index' not in st.session_state: st.session_state.header_index = 0
+if 'wiz_invoice_no' not in st.session_state: st.session_state.wiz_invoice_no = 1
+
+# ==========================================
+# 2. القائمة الجانبية (Sidebar)
+# ==========================================
+st.sidebar.title("القائمة الرئيسية")
+menu = st.sidebar.radio(
+    "تنقل بين الصفحات:",
+    ["1. تأسيس مشروع", "2. معالج رفع المستخلصات (Wizard)", "3. الاعتماد والتقارير"],
+    on_change=reset_wizard 
+)
+
+# ==========================================
+# الصفحة 1: تأسيس مشروع
+# ==========================================
+if menu == "1. تأسيس مشروع":
+    st.header("🛠️ تأسيس المشاريع")
+    tab1, tab2 = st.tabs(["مشروع جديد", "إضافة بنود"])
+    
+    with tab1:
+        with st.form("new_proj"):
+            name = st.text_input("اسم المشروع")
+            loc = st.text_input("الموقع")
+            if st.form_submit_button("حفظ") and name:
+                try:
+                    res = requests.post(f"{API_URL}/projects/", json={"name": name, "location": loc})
+                    if res.status_code == 200: 
+                        st.success("تم الحفظ!")
+                        fetch_projects_list.clear()
+                    else: st.error(f"خطأ: {res.text}")
+                except Exception as e: st.error(f"استثناء: {str(e)}")
+
+    with tab2:
+        proj_map = fetch_projects_list()
+        if proj_map:
+            sel_proj = st.selectbox("اختر المشروع", proj_map.keys())
+            pid = proj_map[sel_proj]
+            with st.form("new_item"):
+                c1, c2 = st.columns(2)
+                code = c1.text_input("كود البند (مثال: 9-2)")
+                unit = c1.text_input("الوحدة")
+                price = c1.number_input("الفئة", min_value=0.0)
+                desc = c2.text_area("الوصف")
+                partial = c2.checkbox("مجزأ؟")
+                if st.form_submit_button("إضافة"):
+                    try:
+                        res = requests.post(f"{API_URL}/boq/{pid}", json={
+                            "item_code": code, "description": desc,
+                            "unit": unit, "unit_price": price, "is_partial": partial
+                        })
+                        if res.status_code == 200:
+                            st.success(f"تم إضافة {code}")
+                        else:
+                            st.error(f"فشل الإضافة: {res.text}")
+                    except Exception as e: st.error(f"خطأ اتصال: {e}")
+        else:
+            st.warning("يرجى إنشاء مشروع أولاً.")
+
+# ==========================================
+# الصفحة 2: معالج رفع المستخلصات (Wizard)
+# ==========================================
+elif menu == "2. معالج رفع المستخلصات (Wizard)":
+    st.header("📤 رفع ومعالجة المستخلصات")
+    progress = (st.session_state.step / 3) * 100
+    st.progress(int(progress))
+
+    # --- الخطوة 1 ---
+    if st.session_state.step == 1:
+        st.subheader("الخطوة 1: الرفع واختيار الشيتات")
+        
+        proj_map = fetch_projects_list()
+        if not proj_map:
+            st.warning("لا توجد مشاريع.")
+            st.stop()
+            
+        st.session_state.selected_proj_name = st.selectbox(
+            "المشروع", proj_map.keys(), 
+            index=0 if 'selected_proj_name' not in st.session_state else list(proj_map.keys()).index(st.session_state.selected_proj_name)
+        )
+        
+        c_inv, c_d1, c_d2 = st.columns([1, 1, 1])
+        st.session_state.wiz_invoice_no = c_inv.number_input("رقم المستخلص", min_value=1, value=st.session_state.wiz_invoice_no)
+        st.session_state.start_date = c_d1.date_input("من تاريخ", value=date.today())
+        st.session_state.end_date = c_d2.date_input("إلى تاريخ", value=date.today())
+
+        uploaded = st.file_uploader("ملف المستخلص (Excel)", type=["xlsx", "xls"])
+        
+        if uploaded:
+            st.session_state.uploaded_file = uploaded
+            try:
+                xl = pd.ExcelFile(uploaded)
+                sheets = xl.sheet_names
+                st.markdown("---")
+                col_civ, col_elec = st.columns(2)
+                with col_civ:
+                    st.markdown("### 🏗️ الأعمال المدنية")
+                    sheet_civ = st.selectbox("شيت المدني", ["-- لا يوجد --"] + sheets)
+                    st.session_state.sheet_civil = sheet_civ if sheet_civ != "-- لا يوجد --" else None
+                with col_elec:
+                    st.markdown("### ⚡ أعمال الكهرباء")
+                    sheet_elec = st.selectbox("شيت الكهرباء", ["-- لا يوجد --"] + sheets)
+                    st.session_state.sheet_elec = sheet_elec if sheet_elec != "-- لا يوجد --" else None
+            except Exception as e:
+                st.error(f"خطأ في الملف: {e}")
+
+        st.markdown("---")
+        col_back, col_space, col_next = st.columns([1, 6, 1])
+        with col_back: st.button("⬅️ السابق", disabled=True)
+        with col_next:
+            if st.button("التالي ➡️", use_container_width=True):
+                if not st.session_state.get('uploaded_file'): st.error("يجب رفع ملف!")
+                elif not st.session_state.sheet_civil and not st.session_state.sheet_elec: st.error("اختر شيت واحد على الأقل!")
+                else:
+                    st.session_state.step = 2
+                    st.rerun()
+
+    # --- الخطوة 2 ---
+    elif st.session_state.step == 2:
+        st.subheader("الخطوة 2: مطابقة الأعمدة")
+        
+        header_row = st.number_input("📍 رقم صف العناوين في الإكسيل:", min_value=1, value=10)
+        st.session_state.header_index = header_row - 1
+        
+        st.markdown("---")
+        file = st.session_state.uploaded_file
+        
+        def draw_mapper(sheet_name, key_prefix):
+            st.markdown(f"### 📑 شيت: {sheet_name}")
+            try:
+                df = pd.read_excel(file, sheet_name=sheet_name, header=st.session_state.header_index)
+                
+                # --- حل مشكلة التحذيرات ---
+                df.columns = df.columns.astype(str)
+                # -------------------------
+                
+                st.write("عينة من البيانات:")
+                st.dataframe(df.head(3))
+                cols_options = [f"{get_col_letter(i)} - {str(col)}" for i, col in enumerate(df.columns)]
+                c1, c2, c3, c4 = st.columns(4)
+                mapping = {}
+                mapping['item_code'] = c1.selectbox(f"رقم البند", cols_options, key=f"{key_prefix}_code")
+                mapping['description'] = c2.selectbox(f"وصف البند", cols_options, key=f"{key_prefix}_desc")
+                mapping['qty'] = c3.selectbox(f"الكمية الحالية", cols_options, key=f"{key_prefix}_qty")
+                mapping['percentage'] = c4.selectbox(f"نسبة الصرف", cols_options, key=f"{key_prefix}_pct")
+                return mapping, df
+            except Exception as e:
+                st.error(f"خطأ قراءة الشيت: {e}")
+                return None, None
+
+        civil_df = None
+        if st.session_state.sheet_civil:
+            civil_map_ui, civil_df = draw_mapper(st.session_state.sheet_civil, "civ")
+            st.session_state.mapping_civil = civil_map_ui
+            st.markdown("---")
+
+        elec_df = None
+        if st.session_state.sheet_elec:
+            elec_map_ui, elec_df = draw_mapper(st.session_state.sheet_elec, "elec")
+            st.session_state.mapping_elec = elec_map_ui
+
+        st.markdown("---")
+        col_back, col_space, col_next = st.columns([1, 6, 2]) 
+        with col_back:
+            if st.button("⬅️ السابق", use_container_width=True):
+                st.session_state.step = 1
+                st.rerun()
+                
+        with col_next:
+            if st.button("معالجة وحفظ ✅", use_container_width=True):
+                proj_map = fetch_projects_list()
+                if not proj_map:
+                    st.error("فشل الاتصال بالمشروع.")
+                    st.stop()
+
+                project_id = proj_map[st.session_state.selected_proj_name]
+                
+                # --- الدالة المحدثة مع تفاصيل الخطأ وتحديد التخصص ---
+                def send_sheet(dataframe, mapping, trade_arg):
+                    if dataframe is None: return None, "No Data"
+                    
+                    clean_map = {k: v.split(" - ", 1)[1] for k, v in mapping.items()}
+                    rename_dict = {
+                        clean_map['item_code']: 'item_code',
+                        clean_map['description']: 'description',
+                        clean_map['qty']: 'qty',
+                        clean_map['percentage']: 'percentage'
+                    }
+                    df_ready = dataframe.rename(columns=rename_dict)
+                    
+                    buffer = io.BytesIO()
+                    try:
+                        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                            df_ready.to_excel(writer, index=False)
+                    except:
+                        df_ready.to_excel(buffer, index=False)
+                    buffer.seek(0)
+                    
+                    files = {"file": ("processed.xlsx", buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+                    
+                    # هنا نرسل نوع التخصص (civil / elec)
+                    data = {
+                        "project_id": project_id,
+                        "invoice_number": st.session_state.wiz_invoice_no,
+                        "start_date": st.session_state.start_date,
+                        "end_date": st.session_state.end_date,
+                        "sheet_name": 0,
+                        "trade_type": trade_arg  # <--- هام جداً
+                    }
+                    
+                    try:
+                        res = requests.post(f"{API_URL}/upload-invoice/", files=files, data=data)
+                        if res.status_code == 200:
+                            return True, res.json().get("message", "تم الرفع بنجاح")
+                        else:
+                            # محاولة قراءة الخطأ بالتفصيل من السيرفر
+                            try:
+                                err_details = res.json()
+                                if "detail" in err_details:
+                                    return False, f"Server Error: {err_details['detail']}"
+                                return False, f"Unknown Error: {err_details}"
+                            except:
+                                return False, f"Raw Error ({res.status_code}): {res.text}"
+                    except Exception as e:
+                        return False, f"Connection Error: {str(e)}"
+
+                # --- التنفيذ ---
+                errors_log = []
+                success_log = []
+
+                if st.session_state.sheet_civil:
+                    is_ok, msg = send_sheet(civil_df, st.session_state.mapping_civil, "civil")
+                    if is_ok: success_log.append(f"المدني: {msg}")
+                    else: errors_log.append(f"❌ خطأ مدني: {msg}")
+
+                if st.session_state.sheet_elec:
+                    is_ok, msg = send_sheet(elec_df, st.session_state.mapping_elec, "elec")
+                    if is_ok: success_log.append(f"الكهرباء: {msg}")
+                    else: errors_log.append(f"❌ خطأ كهرباء: {msg}")
+
+                # عرض النتائج
+                if errors_log:
+                    for err in errors_log:
+                        st.error(err)  # سيعرض رسالة الخطأ المفصلة هنا
+                
+                if success_log:
+                    for s in success_log:
+                        st.success(s)
+
+                if not errors_log:
+                    st.session_state.step = 1
+                    st.info("✅ العملية تمت بنجاح كامل. انتقل لصفحة الاعتماد للمراجعة.")
+
+# ==========================================
+# الصفحة 3: الاعتماد والتقارير
+# ==========================================
+elif menu == "3. الاعتماد والتقارير":
+    st.header("📊 الاعتماد والتقارير")
+    tab_rev, tab_rep = st.tabs(["مراجعة واعتماد", "التقارير"])
+    
+    with tab_rev:
+        col_in, col_btn = st.columns([1, 2])
+        iid = col_in.number_input("رقم المستخلص للمراجعة", value=1)
+        
+        if col_btn.button("جلب البيانات للمراجعة"):
+            try:
+                res = requests.get(f"{API_URL}/invoices/{iid}/staging")
+                if res.status_code == 200:
+                    data = res.json()
+                    if data:
+                        df = pd.DataFrame(data)
+                        
+                        # تلوين الأخطاء
+                        def highlight_invalid(row):
+                            return ['background-color: #ffcccc'] * len(row) if not row['is_valid'] else [''] * len(row)
+                        
+                        st.write(f"عدد البنود: {len(df)}")
+                        st.dataframe(df.style.apply(highlight_invalid, axis=1))
+                    else: st.warning("لا توجد بيانات لهذا المستخلص.")
+                else: st.error(f"خطأ في الجلب: {res.text}")
+            except Exception as e: st.error(f"فشل الاتصال: {e}")
+            
+        if st.button("✅ اعتماد نهائي"):
+            try:
+                res = requests.post(f"{API_URL}/invoices/{iid}/approve")
+                if res.status_code == 200: st.success("تم الاعتماد!")
+                else: 
+                    err = res.json().get('detail', res.text)
+                    st.error(f"خطأ في الاعتماد: {err}")
+            except Exception as e: st.error(f"فشل الاتصال: {e}")
+
+    with tab_rep:
+        proj_map = fetch_projects_list()
+        if proj_map:
+            sel_proj = st.selectbox("المشروع للتقرير", proj_map.keys())
+            pid = proj_map[sel_proj]
+            c1, c2 = st.columns(2)
+            month = c1.selectbox("الشهر", range(1, 13))
+            year = c2.number_input("السنة", value=2025)
+            if st.button("عرض التقرير"):
+                try:
+                    res = requests.get(f"{API_URL}/reports/schedule/{pid}", params={"month": month, "year": year})
+                    if res.status_code == 200:
+                        data = res.json()
+                        if data:
+                            df = pd.DataFrame(data)
+                            st.table(df)
+                            st.bar_chart(df.set_index("item_code")['total_qty'])
+                        else: st.info("لا توجد بيانات لهذه الفترة.")
+                    else: st.error(res.text)
+                except: pass
+
+==================================================
+FILE: init_db.py
+==================================================
+"""
+ملف لإنشاء قاعدة البيانات للمرة الأولى فقط
+هذا الملف يُشغل مرة واحدة فقط عند البداية
+بعد ذلك استخدم Alembic migrations للتغييرات
+"""
+from database import engine, Base
+import models
+
+def init_database():
+    """إنشاء جميع الجداول في قاعدة البيانات"""
+    print("🚀 بدء إنشاء قاعدة البيانات...")
+    Base.metadata.create_all(bind=engine)
+    print("✅ تم إنشاء قاعدة البيانات بنجاح!")
+    print("⚠️ احذف أو اعمل comment لهذا الملف بعد التشغيل الأول")
+
+if __name__ == "__main__":
+    init_database()
+
+
+==================================================
+FILE: main.py
+==================================================
+from typing import List
+from fastapi import FastAPI, Depends, UploadFile, File, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from datetime import date, timedelta
+import shutil
+import os
+import calendar
+
+from database import get_db
+import models
+import schemas
+from services.invoice_processor import process_excel_invoice, approve_invoice
+
+app = FastAPI(title="Construction Cost Control API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def home():
+    return {"message": "System is Running 🚀"}
+
+# --- [تعديل ChatGPT الممتاز: عرض المشاريع] ---
+@app.get("/projects/", response_model=List[schemas.ProjectRead])
+def list_projects(db: Session = Depends(get_db)):
+    projects = db.query(models.Project).all()
+    # تحويل بسيط للتأكد من التوافق
+    return projects
+
+@app.post("/projects/")
+def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db)):
+    new_project = models.Project(
+        name=project.name,
+        location=project.location
+    )
+    db.add(new_project)
+    db.commit()
+    db.refresh(new_project)
+    return new_project
+
+@app.post("/boq/{project_id}")
+def add_boq_item(project_id: int, item: schemas.BOQItemCreate, db: Session = Depends(get_db)):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    new_item = models.BOQItem(
+        project_id=project_id,
+        item_code=item.item_code,
+        description=item.description,
+        unit=item.unit,
+        unit_price=item.unit_price,
+        is_partial=item.is_partial,
+    )
+    db.add(new_item)
+    db.commit()
+    db.refresh(new_item)
+    return new_item
+
+@app.post("/upload-invoice/")
+async def upload_invoice(
+    project_id: int = Form(...),
+    invoice_number: str = Form(...),
+    start_date: date = Form(...),
+    end_date: date = Form(...),
+    sheet_name: str = Form(...), 
+    trade_type: str = Form("general"),  # <--- إضافة: استقبال التخصص
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    os.makedirs("temp_uploads", exist_ok=True)
+    file_path = os.path.join("temp_uploads", file.filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # تحويل اسم الشيت لرقم لو أمكن
+    final_sheet_name = sheet_name
+    if str(sheet_name).isdigit():
+        final_sheet_name = int(sheet_name)
+
+    try:
+        result = process_excel_invoice(
+            db=db,
+            project_id=project_id,
+            file_path=file_path,
+            inv_number=invoice_number,
+            start_date=start_date,
+            end_date=end_date,
+            sheet_name=final_sheet_name,
+            trade_type=trade_type,  # <--- تمرير التخصص للمعالج
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing invoice: {str(e)}")
+
+    return result
+
+@app.get("/invoices/{invoice_id}/staging")
+def get_invoice_staging(invoice_id: int, db: Session = Depends(get_db)):
+    invoice = db.query(models.InvoiceLog).filter(models.InvoiceLog.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    rows = []
+    for s in invoice.staging_data:
+        rows.append({
+            "row_index": s.row_index,
+            "raw_item_code": s.raw_item_code,
+            "raw_description": s.raw_description,
+            "raw_qty": s.raw_qty,
+            "raw_percentage": s.raw_percentage,
+            "is_valid": s.is_valid,
+            "error_message": s.error_message,
+        })
+    return rows
+
+@app.post("/invoices/{invoice_id}/approve")
+def approve_invoice_endpoint(invoice_id: int, db: Session = Depends(get_db)):
+    try:
+        result = approve_invoice(db, invoice_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/reports/schedule/{project_id}")
+def schedule_report(
+    project_id: int,
+    month: int,
+    year: int,
+    db: Session = Depends(get_db),
+):
+    import calendar
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Invalid month")
+    
+    last_day = calendar.monthrange(year, month)[1]
+    start_date = date(year, month, 1)
+    end_date = date(year, month, last_day)
+
+    q = (
+        db.query(
+            models.BOQItem.item_code,
+            models.BOQItem.description,
+            func.sum(models.DailyLedger.distributed_qty).label("total_qty"),
+        )
+        .join(models.DailyLedger, models.DailyLedger.boq_item_id == models.BOQItem.id)
+        .filter(
+            models.DailyLedger.project_id == project_id,
+            models.DailyLedger.entry_date >= start_date,
+            models.DailyLedger.entry_date <= end_date,
+        )
+        .group_by(models.BOQItem.item_code, models.BOQItem.description)
+        .all()
+    )
+
+    return [
+        {
+            "item_code": row.item_code,
+            "description": row.description,
+            "total_qty": float(row.total_qty) if row.total_qty is not None else 0.0,
+        }
+        for row in q
+    ]
+
+==================================================
+FILE: models.py
+==================================================
+from sqlalchemy import Column, Integer, String, Float, Date, Boolean, ForeignKey, Text, Enum, UniqueConstraint
+from sqlalchemy.orm import relationship
+from database import Base
+import enum
+
+# =========================================================
+# 1. Enums
+# =========================================================
+class InvoiceStatus(enum.Enum):
+    DRAFT = "draft"
+    REVIEW = "review"
+    APPROVED = "approved"
+
+# (جديد) تعريف أنواع التخصصات
+class TradeType(enum.Enum):
+    CIVIL = "civil"       # مدني
+    ELEC = "elec"         # كهرباء
+    MECH = "mech"         # ميكانيكا
+    ARCH = "arch"         # معماري
+    GENERAL = "general"   # عام
+
+# =========================================================
+# 2. Projects
+# =========================================================
+class Project(Base):
+    __tablename__ = 'projects'
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    location = Column(String, nullable=True)
+    
+    boq_items = relationship("BOQItem", back_populates="project")
+    invoices = relationship("InvoiceLog", back_populates="project")
+    ledger_entries = relationship("DailyLedger", back_populates="project")
+
+# =========================================================
+# 3. BOQ Items
+# =========================================================
+class BOQItem(Base):
+    __tablename__ = 'boq_items'
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'))
+    item_code = Column(String, index=True)
+    description = Column(String)
+    unit = Column(String)
+    unit_price = Column(Float, default=0.0)
+    is_partial = Column(Boolean, default=False)
+    
+    project = relationship("Project", back_populates="boq_items")
+    invoice_details = relationship("InvoiceDetail", back_populates="boq_item")
+    ledger_entries = relationship("DailyLedger", back_populates="boq_item")
+
+# =========================================================
+# 4. Invoice Log
+# =========================================================
+class InvoiceLog(Base):
+    __tablename__ = 'invoices_log'
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'))
+    invoice_number = Column(Integer, index=True)
+    status = Column(Enum(InvoiceStatus), default=InvoiceStatus.DRAFT)
+    period_start = Column(Date)
+    period_end = Column(Date)
+    previous_invoice_id = Column(Integer, ForeignKey('invoices_log.id'), nullable=True)
+    
+    project = relationship("Project", back_populates="invoices")
+    details = relationship("InvoiceDetail", back_populates="invoice")
+    staging_data = relationship("StagingInvoiceDetail", back_populates="invoice")
+    ledger_entries = relationship("DailyLedger", back_populates="invoice")
+    previous_invoice = relationship("InvoiceLog", remote_side=[id])
+    
+    __table_args__ = (
+        UniqueConstraint('project_id', 'invoice_number', name='uix_project_invoice_number'),
+    )
+
+# =========================================================
+# 5. Staging Area (تعديل: إضافة trade)
+# =========================================================
+class StagingInvoiceDetail(Base):
+    __tablename__ = 'staging_invoice_details'
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey('invoices_log.id'))
+    row_index = Column(Integer)
+    
+    raw_item_code = Column(String, nullable=True)
+    raw_description = Column(String, nullable=True)
+    raw_qty = Column(String, nullable=True)
+    raw_percentage = Column(String, nullable=True)
+    
+    # (تمت الإضافة)
+    trade = Column(Enum(TradeType), default=TradeType.GENERAL)
+
+    is_valid = Column(Boolean, default=False)
+    error_message = Column(Text, nullable=True)
+    
+    invoice = relationship("InvoiceLog", back_populates="staging_data")
+
+# =========================================================
+# 6. Invoice Details (تعديل: إضافة trade)
+# =========================================================
+class InvoiceDetail(Base):
+    __tablename__ = 'invoice_details'
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey('invoices_log.id'))
+    boq_item_id = Column(Integer, ForeignKey('boq_items.id'))
+    
+    row_description = Column(String, nullable=True)
+    current_percentage = Column(Float, default=100.0)
+    claimed_qty = Column(Float, default=0.0)
+    approved_qty = Column(Float, default=0.0)
+    equivalent_qty = Column(Float, default=0.0)
+    
+    previous_cumulative_qty = Column(Float, default=0.0)
+    total_cumulative_qty = Column(Float, default=0.0)
+    unit_price_at_time = Column(Float)
+    total_value = Column(Float, default=0.0)
+    notes = Column(Text)
+    
+    # (تمت الإضافة)
+    trade = Column(Enum(TradeType), default=TradeType.GENERAL)
+    
+    invoice = relationship("InvoiceLog", back_populates="details")
+    boq_item = relationship("BOQItem", back_populates="invoice_details")
+
+# =========================================================
+# 7. Daily Ledger
+# =========================================================
+class DailyLedger(Base):
+    __tablename__ = 'daily_ledger'
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'))
+    invoice_id = Column(Integer, ForeignKey('invoices_log.id'))
+    boq_item_id = Column(Integer, ForeignKey('boq_items.id'))
+    entry_date = Column(Date, index=True)
+    distributed_qty = Column(Float, default=0.0)
+    
+    project = relationship("Project", back_populates="ledger_entries")
+    invoice = relationship("InvoiceLog", back_populates="invoice_entries") # تم تعديل الاسم هنا لتجنب التكرار
+    boq_item = relationship("BOQItem", back_populates="ledger_entries")
+    
+    # تصحيح علاقة invoice في DailyLedger لتطابق InvoiceLog
+    invoice = relationship("InvoiceLog", back_populates="ledger_entries")
+
+==================================================
+FILE: README_DB.md
+==================================================
+# إدارة قاعدة البيانات - دليل الاستخدام
+
+## 🎯 التهيئة الأولى (مرة واحدة فقط)
+
+عند بدء المشروع لأول مرة، قم بتشغيل:
+
+```bash
+python init_db.py
+```
+
+هذا سينشئ ملف `construction_system.db` مع جميع الجداول.
+
+**⚠️ مهم جداً:** بعد التشغيل الأول، **احذف** أو اعمل comment للملف `init_db.py` أو على الأقل لا تشغله مرة أخرى!
+
+---
+
+## 🔄 استخدام Alembic للـ Migrations (موصى به للإنتاج)
+
+### 1. تثبيت Alembic
+
+```bash
+pip install alembic
+```
+
+### 2. تهيئة Alembic
+
+```bash
+alembic init alembic
+```
+
+### 3. تعديل ملف `alembic.ini`
+
+ابحث عن السطر:
+```ini
+sqlalchemy.url = driver://user:pass@localhost/dbname
+```
+
+واستبدله بـ:
+```ini
+sqlalchemy.url = sqlite:///construction_system.db
+```
+
+### 4. تعديل ملف `alembic/env.py`
+
+أضف في بداية الملف:
+```python
+from database import Base
+import models  # استيراد جميع الـ models
+target_metadata = Base.metadata
+```
+
+### 5. إنشاء Migration جديد
+
+كل ما تعدل في الـ models، قم بإنشاء migration:
+
+```bash
+alembic revision --autogenerate -m "وصف التعديل"
+```
+
+### 6. تطبيق الـ Migration
+
+```bash
+alembic upgrade head
+```
+
+### 7. التراجع عن Migration (لو لزم)
+
+```bash
+alembic downgrade -1
+```
+
+---
+
+## 📝 مثال: إضافة عمود جديد
+
+### الخطوات:
+
+1. عدل الـ model في `models.py`:
+```python
+class Project(Base):
+    __tablename__ = 'projects'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    budget = Column(Float, default=0.0)  # ← عمود جديد
+```
+
+2. أنشئ migration:
+```bash
+alembic revision --autogenerate -m "add budget to projects"
+```
+
+3. طبق التغيير:
+```bash
+alembic upgrade head
+```
+
+**✅ البيانات القديمة آمنة ولن تُحذف!**
+
+---
+
+## ⚠️ تحذيرات مهمة
+
+1. **لا تستخدم** `Base.metadata.create_all()` في كود التطبيق الرئيسي
+2. **لا تشغل** `init_db.py` أكثر من مرة
+3. **استخدم** Alembic migrations لأي تعديلات مستقبلية
+4. **اعمل Backup** لقاعدة البيانات قبل تطبيق أي migration
+
+---
+
+## 🔍 فحص الـ Migrations الحالية
+
+```bash
+alembic current
+alembic history
+```
+
+---
+
+## 🆘 استعادة من Backup
+
+إذا حدث خطأ:
+1. احذف ملف `construction_system.db`
+2. استعد النسخة الاحتياطية
+3. أو أعد تشغيل `init_db.py` وأدخل البيانات من جديد
+
+
+==================================================
+FILE: requirements.txt
+==================================================
+fastapi
+uvicorn
+sqlalchemy
+pandas
+openpyxl
+python-multipart
+pydantic
+
+
+==================================================
+FILE: schemas.py
+==================================================
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import date
+from enum import Enum
+
+# Shared Enums
+class InvoiceStatusEnum(str, Enum):
+    DRAFT = "draft"
+    REVIEW = "review"
+    APPROVED = "approved"
+
+# ---------------------------------------
+# 1. Projects & BOQ
+# ---------------------------------------
+class BOQItemBase(BaseModel):
+    item_code: str
+    description: str
+    unit: str             # تمت الإضافة بناء على المراجعة
+    unit_price: float
+    is_partial: bool = False
+
+class BOQItemCreate(BOQItemBase):
+    pass
+
+class BOQItemRead(BOQItemBase):
+    id: int
+    class Config:
+        from_attributes = True
+
+class ProjectCreate(BaseModel):
+    name: str
+    location: Optional[str] = None  # تمت الإضافة بناء على المراجعة
+
+class ProjectRead(ProjectCreate):
+    id: int
+    boq_items: List[BOQItemRead] = []
+    class Config:
+        from_attributes = True
+
+# ---------------------------------------
+# 2. Invoice Details
+# ---------------------------------------
+class InvoiceDetailBase(BaseModel):
+    boq_item_id: int
+    row_description: Optional[str] = None
+    current_percentage: float = 100.0
+    claimed_qty: float = 0.0
+    approved_qty: float = 0.0
+    notes: Optional[str] = None
+
+class InvoiceDetailRead(InvoiceDetailBase):
+    id: int
+    equivalent_qty: float
+    previous_cumulative_qty: float
+    total_cumulative_qty: float
+    total_value: float
+    
+    class Config:
+        from_attributes = True
+
+# ---------------------------------------
+# 3. Invoice Log
+# ---------------------------------------
+class InvoiceLogBase(BaseModel):
+    project_id: int
+    invoice_number: int
+    period_start: date
+    period_end: date
+    status: InvoiceStatusEnum = InvoiceStatusEnum.DRAFT
+
+class InvoiceLogCreate(InvoiceLogBase):
+    previous_invoice_id: Optional[int] = None
+
+class InvoiceLogRead(InvoiceLogBase):
+    id: int
+    details: List[InvoiceDetailRead] = []
+
+    class Config:
+        from_attributes = True
+
+==================================================
+FILE: services\invoice_processor.py
+==================================================
+import pandas as pd
+import re
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+from datetime import date, timedelta
+
+from models import (
+    InvoiceLog,
+    InvoiceDetail,
+    BOQItem,
+    DailyLedger,
+    Project,
+    InvoiceStatus,
+    StagingInvoiceDetail,
+    # تأكد من استيراد TradeType لو عملته Enum، أو استخدم نصوص عادية
+)
+
+def _parse_float(value, default: float = 0.0) -> float:
+    """Helper: يحول أي قيمة نصية لرقم Float بأمان."""
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    if not s or s.lower() == "nan":
+        return default
+    s = s.replace("%", "").strip().replace(",", "")
+    try:
+        return float(s)
+    except ValueError:
+        return default
+
+def extract_phase_from_text(text):
+    """يفصل الوصف عن المرحلة (ما بين القوسين)."""
+    if text is None: return "", ""
+    clean_text = str(text).strip()
+    if not clean_text or clean_text.lower() == 'nan': return "", ""
+
+    pattern = r"\((.*?)\)$"
+    match = re.search(pattern, clean_text)
+    
+    if match:
+        phase = match.group(1).strip()
+        main_desc = clean_text[:match.start()].strip()
+        return main_desc, phase
+    
+    return clean_text, "كامل"
+
+def process_excel_invoice(
+    db: Session,
+    project_id: int,
+    file_path: str,
+    inv_number: str | int,
+    start_date: date,
+    end_date: date,
+    sheet_name: str = 0,
+    trade_type: str = "general"  # معامل جديد لتحديد التخصص (مدني/كهرباء)
+):
+    """
+    Phase 1: STAGING with Merge Logic
+    يسمح برفع ملفات متعددة (مدني، كهرباء) لنفس المستخلص دون مسح البيانات السابقة.
+    """
+    
+    # 1. Validation: Project exists
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise ValueError(f"Project with id={project_id} not found")
+
+    try:
+        invoice_number_int = int(inv_number)
+    except (TypeError, ValueError):
+        raise ValueError("invoice_number must be convertible to integer")
+
+    # --- منطق التعامل مع المستخلص الموجود (Merge Logic) ---
+    existing_invoice = db.query(InvoiceLog).filter(
+        InvoiceLog.project_id == project_id,
+        InvoiceLog.invoice_number == invoice_number_int
+    ).first()
+
+    current_invoice_id = None
+
+    if existing_invoice:
+        # لو معتمد، نرفض التعديل
+        if existing_invoice.status == InvoiceStatus.APPROVED:
+            raise ValueError(
+                f"تنبيه: المستخلص رقم ({invoice_number_int}) معتمد سابقاً ولا يمكن التعديل عليه."
+            )
+        
+        # لو مسودة (Draft)، نستخدمه
+        current_invoice_id = existing_invoice.id
+        
+        # تحديث التواريخ لتشمل أوسع نطاق (اختياري)
+        existing_invoice.period_start = start_date
+        existing_invoice.period_end = end_date
+        
+        # هام: نمسح فقط بيانات الـ Staging القديمة الخاصة بـ "نفس التخصص" 
+        # عشان لو برفع "مدني" تاني (تعديل)، يمسح المدني القديم بس ويسيب الكهرباء
+        # (يتطلب وجود عمود trade في StagingInvoiceDetail)
+        try:
+            db.query(StagingInvoiceDetail).filter(
+                StagingInvoiceDetail.invoice_id == current_invoice_id,
+                StagingInvoiceDetail.trade == trade_type
+            ).delete()
+            db.commit()
+        except Exception:
+            # لو العمود مش موجود لسه، تجاهل الخطأ مؤقتاً (لكن يفضل تحديث الموديل)
+            db.rollback()
+            pass
+
+    else:
+        # إنشاء مستخلص جديد (Header)
+        new_invoice = InvoiceLog(
+            project_id=project_id,
+            invoice_number=invoice_number_int,
+            period_start=start_date,
+            period_end=end_date,
+            status=InvoiceStatus.DRAFT,
+        )
+        db.add(new_invoice)
+        db.commit()
+        db.refresh(new_invoice)
+        current_invoice_id = new_invoice.id
+
+    # 2. Read Excel
+    try:
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+    except Exception as e:
+        raise ValueError(f"Failed to read Excel file: {str(e)}")
+
+    # 3. Column Mapping
+    col_map = {"item_code": None, "description": None, "qty": None, "percentage": None}
+    lower_cols = {str(c).strip().lower(): c for c in df.columns}
+
+    patterns_map = {
+        "item_code": ["item_code", "code", "item", "boq", "boq_code", "رقم البند", "كود", "رقم بند", "بند"],
+        "description": ["description", "desc", "تفصيل", "البند", "بيان الأعمال", "وصف", "بنود الأعمال"],
+        "qty": ["total_qty", "qty", "quantity", "الكمية", "الكمية الحالية", "الجارى", "الجاري", "كمية الأعمال الجارية"],
+        "percentage": ["percentage", "pct", "نسبة", "نسبة الصرف", "نسبة التنفيذ"],
+    }
+
+    for key, patterns in patterns_map.items():
+        for p in patterns:
+            lp = p.lower()
+            if lp in lower_cols:
+                col_map[key] = lower_cols[lp]
+                break
+
+    if not col_map["item_code"] or not col_map["qty"]:
+        raise ValueError(f"الأعمدة المطلوبة غير موجودة. المتاح: {list(lower_cols.values())}")
+
+    # 4. Bulk Insert into Staging
+    staging_objects = []
+    rows_staged = 0
+    
+    for idx, row in df.iterrows():
+        raw_item_code = row.get(col_map["item_code"])
+        
+        # تجاهل الصفوف الفارغة
+        if pd.isna(raw_item_code) or str(raw_item_code).strip() == "":
+            continue
+
+        raw_desc = row.get(col_map["description"])
+        raw_qty = row.get(col_map["qty"])
+        raw_pct = row.get(col_map["percentage"])
+
+        staging_row = StagingInvoiceDetail(
+            invoice_id=current_invoice_id,
+            row_index=int(idx),
+            raw_item_code=str(raw_item_code).strip(),
+            raw_description=str(raw_desc).strip() if pd.notna(raw_desc) else "",
+            raw_qty=str(raw_qty).strip() if pd.notna(raw_qty) else "",
+            raw_percentage=str(raw_pct).strip() if pd.notna(raw_pct) else "",
+            
+            trade=trade_type,  # <--- حفظ التخصص (مدني/كهرباء)
+            
+            is_valid=False,
+            error_message=None,
+        )
+        staging_objects.append(staging_row)
+        rows_staged += 1
+
+    if staging_objects:
+        db.add_all(staging_objects)
+        db.commit()
+
+    return {
+        "status": "staged",
+        "invoice_id": current_invoice_id,
+        "rows_staged": rows_staged,
+        "trade": trade_type,
+        "message": f"تم رفع {rows_staged} بند ({trade_type}) بنجاح للمسودة."
+    }
+
+def approve_invoice(db: Session, invoice_id: int):
+    """
+    Phase 2: APPROVAL & LEDGER
+    يقوم بنقل البيانات من Staging إلى Details وحساب الـ Ledger
+    """
+    
+    invoice = db.query(InvoiceLog).filter(InvoiceLog.id == invoice_id).first()
+    if not invoice:
+        raise ValueError("Invoice not found")
+
+    if invoice.status == InvoiceStatus.APPROVED:
+        raise ValueError("Invoice is already approved")
+
+    staging_rows = invoice.staging_data
+    if not staging_rows:
+        raise ValueError("No staging rows found")
+
+    # Time Calculation
+    start_date = invoice.period_start
+    end_date = invoice.period_end
+    total_days = (end_date - start_date).days + 1
+    if total_days <= 0:
+        total_days = 1 # Fallback to prevent division by zero
+
+    # Clean old data (Full clear for this invoice ID)
+    # تنظيف كامل قبل إعادة البناء لضمان عدم التكرار
+    db.query(DailyLedger).filter(DailyLedger.invoice_id == invoice.id).delete()
+    db.query(InvoiceDetail).filter(InvoiceDetail.invoice_id == invoice.id).delete()
+
+    processed_count = 0
+    errors_found = 0
+
+    for s in staging_rows:
+        s.is_valid = False
+        s.error_message = None
+
+        raw_item_code = s.raw_item_code.strip()
+        
+        # البحث عن البند في المقايسة
+        boq_item = (
+            db.query(BOQItem)
+            .filter(
+                BOQItem.project_id == invoice.project_id,
+                BOQItem.item_code == raw_item_code,
+            )
+            .first()
+        )
+        
+        if not boq_item:
+            s.error_message = f"كود البند '{raw_item_code}' غير موجود في المقايسة"
+            errors_found += 1
+            continue # تخطي هذا السطر لكن لا توقف العملية كلها
+
+        # الحسابات
+        claimed_qty = _parse_float(s.raw_qty, 0.0)
+        current_percentage = _parse_float(s.raw_percentage, 100.0)
+        approved_qty = claimed_qty
+        equivalent_qty = approved_qty * (current_percentage / 100.0)
+
+        # التراكمي السابق (Complex Logic)
+        last_cumulative_record = (
+            db.query(InvoiceDetail)
+            .join(InvoiceLog)
+            .filter(
+                InvoiceLog.project_id == invoice.project_id,
+                InvoiceLog.status == InvoiceStatus.APPROVED,
+                InvoiceLog.id < invoice.id,
+                InvoiceDetail.boq_item_id == boq_item.id,
+            )
+            .order_by(desc(InvoiceLog.id))
+            .first()
+        )
+
+        previous_cumulative_qty = last_cumulative_record.total_cumulative_qty if last_cumulative_record else 0.0
+        total_cumulative_qty = previous_cumulative_qty + equivalent_qty
+        
+        unit_price = boq_item.unit_price or 0.0
+        total_value = equivalent_qty * unit_price
+
+        main_desc_text, phase_name = extract_phase_from_text(s.raw_description)
+        final_desc = phase_name or main_desc_text or "بند كامل"
+
+        # إنشاء السجل في الدفتر النظيف
+        detail = InvoiceDetail(
+            invoice_id=invoice.id,
+            boq_item_id=boq_item.id,
+            row_description=final_desc,
+            current_percentage=current_percentage,
+            claimed_qty=claimed_qty,
+            approved_qty=approved_qty,
+            equivalent_qty=equivalent_qty,
+            previous_cumulative_qty=previous_cumulative_qty,
+            total_cumulative_qty=total_cumulative_qty,
+            unit_price_at_time=unit_price,
+            total_value=total_value,
+            
+            trade=s.trade # <--- نقل التخصص من الـ Staging
+        )
+        db.add(detail)
+
+        # إنشاء سجلات التوزيع الزمني (Ledger)
+        if equivalent_qty != 0:
+            daily_rate = equivalent_qty / total_days
+            ledger_entries = [
+                DailyLedger(
+                    project_id=invoice.project_id,
+                    invoice_id=invoice.id,
+                    boq_item_id=boq_item.id,
+                    entry_date=start_date + timedelta(days=i),
+                    distributed_qty=daily_rate,
+                )
+                for i in range(total_days)
+            ]
+            db.add_all(ledger_entries)
+
+        s.is_valid = True
+        s.error_message = "Success"
+        processed_count += 1
+
+    # لا نعتمد المستخلص إلا لو مفيش أخطاء (اختياري، ممكن تعتمده جزئياً)
+    # هنا سنسمح بالاعتماد وسنترك الأخطاء في الـ Staging للمراجعة
+    invoice.status = InvoiceStatus.APPROVED
+    db.commit()
+
+    return {
+        "status": "approved",
+        "invoice_id": invoice.id,
+        "processed_items": processed_count,
+        "errors": errors_found,
+        "message": f"تم الاعتماد. تم معالجة {processed_count} بند، ووجد {errors_found} أخطاء."
+    }

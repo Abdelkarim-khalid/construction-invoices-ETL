@@ -1,4 +1,4 @@
-from typing import List  # <--- إضافة هامة
+from typing import List
 from fastapi import FastAPI, Depends, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -6,6 +6,7 @@ from sqlalchemy import func
 from datetime import date, timedelta
 import shutil
 import os
+import calendar
 
 from database import get_db
 import models
@@ -26,12 +27,12 @@ app.add_middleware(
 def home():
     return {"message": "System is Running 🚀"}
 
-# --- Endpoint جديد: جلب كل المشاريع للقائمة المنسدلة ---
+# --- [تعديل ChatGPT الممتاز: عرض المشاريع] ---
 @app.get("/projects/", response_model=List[schemas.ProjectRead])
-def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    projects = db.query(models.Project).offset(skip).limit(limit).all()
+def list_projects(db: Session = Depends(get_db)):
+    projects = db.query(models.Project).all()
+    # تحويل بسيط للتأكد من التوافق
     return projects
-# -------------------------------------------------------
 
 @app.post("/projects/")
 def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db)):
@@ -69,6 +70,8 @@ async def upload_invoice(
     invoice_number: str = Form(...),
     start_date: date = Form(...),
     end_date: date = Form(...),
+    sheet_name: str = Form(...), 
+    trade_type: str = Form("general"),  # <--- إضافة: استقبال التخصص
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
@@ -78,6 +81,11 @@ async def upload_invoice(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
+    # تحويل اسم الشيت لرقم لو أمكن
+    final_sheet_name = sheet_name
+    if str(sheet_name).isdigit():
+        final_sheet_name = int(sheet_name)
+
     try:
         result = process_excel_invoice(
             db=db,
@@ -86,6 +94,8 @@ async def upload_invoice(
             inv_number=invoice_number,
             start_date=start_date,
             end_date=end_date,
+            sheet_name=final_sheet_name,
+            trade_type=trade_type,  # <--- تمرير التخصص للمعالج
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error processing invoice: {str(e)}")
@@ -127,6 +137,9 @@ def schedule_report(
     db: Session = Depends(get_db),
 ):
     import calendar
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Invalid month")
+    
     last_day = calendar.monthrange(year, month)[1]
     start_date = date(year, month, 1)
     end_date = date(year, month, last_day)
@@ -151,7 +164,7 @@ def schedule_report(
         {
             "item_code": row.item_code,
             "description": row.description,
-            "total_qty": row.total_qty or 0.0,
+            "total_qty": float(row.total_qty) if row.total_qty is not None else 0.0,
         }
         for row in q
     ]
