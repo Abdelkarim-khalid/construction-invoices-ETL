@@ -9,7 +9,7 @@ import string
 # 1. إعدادات الصفحة والتهيئة
 # ==========================================
 st.set_page_config(page_title="Mini ERP - Construction", layout="wide")
-API_URL = "http://127.0.0.1:8000"
+API_URL = "http://127.0.0.1:8000/api/v1"
 
 
 # --- Helper Functions ---
@@ -106,7 +106,7 @@ if menu == "1. تأسيس مشروع":
                 if st.form_submit_button("إضافة"):
                     try:
                         res = requests.post(
-                            f"{API_URL}/boq/{pid}",
+                            f"{API_URL}/projects/{pid}/boq",
                             json={
                                 "item_code": code,
                                 "description": desc,
@@ -328,7 +328,7 @@ elif menu == "2. معالج رفع المستخلصات (Wizard)":
 
                     try:
                         res = requests.post(
-                            f"{API_URL}/upload-invoice/",
+                            f"{API_URL}/invoices/upload",
                             files=files,
                             data=data,
                         )
